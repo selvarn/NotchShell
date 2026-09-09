@@ -1,7 +1,7 @@
 pragma Singleton
 
 import QtQuick
-import ".."
+import "."
 
 // Which launcher is open, what has been typed into it, and which row is
 // selected. Deliberately tiny: the views own their own results, and this owns

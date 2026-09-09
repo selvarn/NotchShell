@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import ".."
+import "../core"
 
 // NetworkManager state via nmcli. Polled rather than pushed: nmcli has no
 // cheap signal interface and the Command Center only needs a refresh while

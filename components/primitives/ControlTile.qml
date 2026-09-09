@@ -1,5 +1,4 @@
 import QtQuick
-import "../.."
 import "../../core"
 
 // A Command Center tile with two levels of interaction:

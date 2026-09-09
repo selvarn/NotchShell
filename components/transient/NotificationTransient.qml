@@ -1,5 +1,5 @@
 import QtQuick
-import "../../"
+import "../../core"
 
 // A single message, condensed to two lines. The shell does not own the
 // notification bus (see services/Notify.qml), so nothing routes here on its

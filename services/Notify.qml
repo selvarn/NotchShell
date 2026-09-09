@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import ".."
+import "../core"
 
 // Do-Not-Disturb and notification history, driven through `dunstctl`.
 //

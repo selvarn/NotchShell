@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Services.Pipewire
-import ".."
+import "../core"
 
 // Default sink / source volume and mute, plus the list of real (non-stream)
 // devices so the Audio page can switch outputs and inputs.

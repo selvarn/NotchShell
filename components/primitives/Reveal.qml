@@ -1,5 +1,4 @@
 import QtQuick
-import "../.."
 import "../../core"
 
 // Wraps one row of Command Center content so it fades and rises very

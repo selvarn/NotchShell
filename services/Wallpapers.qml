@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Qt.labs.folderlistmodel
-import ".."
+import "../core"
 
 // The wallpaper folder, and the commands that put one on screen.
 //

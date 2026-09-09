@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // A thin scroll rail for a Flickable: how much more there is, and a handle to
 // go there directly.

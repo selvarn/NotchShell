@@ -1,5 +1,4 @@
 import QtQuick
-import "../../"
 import "../../core"
 
 // What the resting notch shows: the time, and nothing else. Deliberately

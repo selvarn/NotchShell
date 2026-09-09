@@ -1,5 +1,4 @@
 import QtQuick
-import "../../"
 import "../../core"
 import "../primitives"
 

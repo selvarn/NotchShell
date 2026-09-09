@@ -1,6 +1,6 @@
 import QtQuick
-import "../../"
 import "../../services"
+import "../../core"
 
 // Volume: a segmented meter + percent. No icon font — the segments carry the
 // meaning; the muted state dims everything and swaps the label.

@@ -3,6 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "."
 
 // Colour system. Reads the live pywal palette (~/.cache/wal/colors.json),
 // derives a small set of semantic tokens and adapts to a light or dark
@@ -15,7 +16,11 @@ import Quickshell.Io
 //     lifted, borderless cards. Depth comes from tone steps and roundness,
 //     not from translucency or blur.
 //
-// Every component pulls colour from here. No literal hex in components.
+// Every component pulls colour from here. No literal hex in components, and
+// no hex in the config either beyond the one accent a person may want to
+// pin: light/dark, accent and the two font families are the whole of what
+// `shell.conf` says about colour — the ladder is derived, so a palette can
+// never come out half-legible.
 QtObject {
     id: theme
 
@@ -64,6 +69,16 @@ QtObject {
         var q = Qt.color(c);
         return Qt.rgba(q.r, q.g, q.b, a);
     }
+    // A chosen family in front of the fallbacks, without repeating itself if
+    // the choice is already one of them.
+    function _stack(pick, fallbacks) {
+        var list = fallbacks.split(", ").filter(function (f) {
+            return f.toLowerCase() !== pick.toLowerCase();
+        });
+        list.unshift(pick);
+        return list.join(", ");
+    }
+
     // Linear blend between two colours. Used both to build the tone ladder
     // below and, by the notch, to morph its fill from bezel-black into the
     // Command Center's panel tone as the sheet opens.
@@ -76,11 +91,15 @@ QtObject {
     readonly property color _wpBg: _sp("background", _col("color0", "#17141a"))
     readonly property color _wpFg: _sp("foreground", _col("color7", "#e8e6ea"))
 
-    readonly property bool isLight: _lum(_wpBg) > 0.62
+    // `look.theme`: "auto" reads the wallpaper's own brightness.
+    readonly property bool isLight: Settings.theme === "light" ? true : Settings.theme === "dark" ? false : _lum(_wpBg) > 0.62
 
-    // Accent: the most chromatic swatch pywal produced. If the palette is
-    // near-greyscale we fall back to a calm periwinkle so accents still read.
+    // Accent: whatever `look.accent` pins, else the most chromatic swatch
+    // pywal produced. If the palette is near-greyscale we fall back to a calm
+    // periwinkle so accents still read.
     readonly property color _pickedAccent: {
+        if (_accentPinned)
+            return Settings.accent;
         var keys = ["color5", "color4", "color6", "color2", "color3", "color1", "color13", "color12"];
         var best = null, bestC = 0;
         for (var i = 0; i < keys.length; i++) {
@@ -125,7 +144,14 @@ QtObject {
     readonly property color textFaint: _alpha(textPrimary, 0.22)
 
     // ── accent ───────────────────────────────────────────────────
+    // A pinned accent is taken exactly as written — someone who typed a hex
+    // code has already decided. Only a colour *derived* from the wallpaper
+    // gets pushed toward legibility, because nobody chose it.
+    readonly property bool _accentPinned: /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(Settings.accent)
+
     readonly property color accent: {
+        if (_accentPinned)
+            return _pickedAccent;
         var q = Qt.color(_pickedAccent);
         var s = Math.min(1.0, q.hslSaturation * 1.35 + 0.05);
         var l = isLight ? Math.min(0.6, q.hslLightness) : Math.max(0.62, Math.min(0.78, q.hslLightness + 0.08));
@@ -141,8 +167,10 @@ QtObject {
     readonly property color negative: blend("#e06c75", textPrimary, 0.1)
 
     // ── typography ───────────────────────────────────────────────
-    readonly property string fontSans: "Inter, Roboto, -apple-system, Sans-Serif"
-    readonly property string fontMono: "JetBrains Mono, monospace"
+    // `look.font` / `look.mono_font`, each with a fallback chain behind it so
+    // a font that is not installed degrades instead of disappearing.
+    readonly property string fontSans: _stack(Settings.font, "Inter, Roboto, -apple-system, Sans-Serif")
+    readonly property string fontMono: _stack(Settings.monoFont, "JetBrains Mono, monospace")
     // Nerd Font is installed system-wide; it supplies every icon glyph so
     // the shell needs no icon theme and no SVG assets.
     readonly property string fontIcon: "JetBrainsMono Nerd Font"

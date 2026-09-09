@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
-import "../"
+import "../core"
 
 // The morphing silhouette.
 //

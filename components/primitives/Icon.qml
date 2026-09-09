@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // A single Nerd Font glyph, optically centred in a predictable square box.
 //

@@ -1,7 +1,7 @@
 pragma Singleton
 
 import QtQuick
-import ".."
+import "."
 
 // The single source of truth for what the shell is doing.
 //

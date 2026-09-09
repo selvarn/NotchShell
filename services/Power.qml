@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import ".."
+import "../core"
 
 // Session and power actions. Every one of these is irreversible from the
 // UI's point of view, so the Power page always asks for a second tap before

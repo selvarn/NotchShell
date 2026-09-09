@@ -1,24 +1,48 @@
 pragma Singleton
 
 import QtQuick
+import "."
 
-// Central tuning surface for the whole shell: geometry, timing and motion
-// tokens. Nothing here is a colour (see Theme.qml) and nothing here holds
-// runtime state (see core/UiState.qml). Change values here, not in components.
+// Every geometry, timing and motion number the shell runs on.
+//
+// This is NOT the config. `shell.conf` is — a dozen questions in plain text,
+// read and validated by core/Settings.qml. What lives here is the answer to
+// all the questions that were never asked: the shape schedule of the notch,
+// the tone of every animation curve, the sizes that hold the layout
+// together. They are derived from the config where the config has an
+// opinion, and fixed where it does not.
+//
+// So: a person tuning the shell edits shell.conf. Someone changing what the
+// shell *is* edits this. Components read neither literal nor config — only
+// the tokens below.
 QtObject {
     id: cfg
+
+    // Every animation in the shell is scaled by one number the user owns.
+    readonly property real _speed: Settings.animationSpeed
+    function _dur(ms) {
+        return Math.max(1, Math.round(ms * _speed));
+    }
+
+    // Roundness, likewise: one decision, applied to cards and the sheet in
+    // full and to the notch's own silhouette at half strength — its corners
+    // are part of how the shape reads as a bezel, not a taste setting.
+    readonly property real _r: Settings.rounding
+    readonly property real _rNotch: 1 + (Settings.rounding - 1) * 0.5
 
     // ─────────────────────────────────────────────────────────────
     //  Geometry — peek ("the notch")
     // ─────────────────────────────────────────────────────────────
 
-    readonly property real peekWidth: 172
-    readonly property real peekHeight: 34
+    readonly property real peekWidth: Settings.notchWidth
+    readonly property real peekHeight: Settings.notchHeight
 
     // Concave "ears" that fuse the peek into the top bezel. Only present
     // while the shape is still attached to the edge (morphs away on drag).
-    readonly property real earRadius: 15
-    readonly property real peekCorner: 17
+    readonly property real earRadius: 15 * _rNotch
+    // Never more than half the height: past that the arcs meet and the lip
+    // stops being a rectangle with rounded ends.
+    readonly property real peekCorner: Math.min(peekHeight / 2, 17 * _rNotch)
 
     // Shape-morph schedule, expressed on the notch's detach parameter t.
     // The ear must be fully gone *before* the attached→detached path swap
@@ -34,7 +58,7 @@ QtObject {
     // term on the notch's own geometry — it never touches `progress`, so it
     // can never push the shape across a phase boundary.
     readonly property real peekBounce: 1.6
-    readonly property int bounceEaseDur: 130
+    readonly property int bounceEaseDur: _dur(130)
 
     // How much a transient status is allowed to widen the peek.
     readonly property real transientMaxWidth: 320
@@ -49,9 +73,9 @@ QtObject {
     //  Geometry — Command Center
     // ─────────────────────────────────────────────────────────────
 
-    readonly property real expandedWidth: 500
+    readonly property real expandedWidth: Settings.panelWidth
     readonly property real expandedMinHeight: 180
-    readonly property real expandedCorner: 34
+    readonly property real expandedCorner: 34 * _r
     // Gap between the top screen edge and the lifted panel.
     readonly property real expandedGap: 12
 
@@ -59,9 +83,9 @@ QtObject {
     readonly property real gap: 12
 
     // Soft-UI radii. No glass; depth comes from tone steps and roundness.
-    readonly property real rSm: 12
-    readonly property real rMd: 18
-    readonly property real rLg: 24
+    readonly property real rSm: 12 * _r
+    readonly property real rMd: 18 * _r
+    readonly property real rLg: 24 * _r
 
     readonly property real clockTileSize: 132
     readonly property real tileHeight: 62
@@ -74,7 +98,7 @@ QtObject {
 
     // The launcher is a centred sheet, not part of the notch: it needs the
     // keyboard, and the notch window deliberately never takes focus.
-    readonly property real launcherWidth: 640
+    readonly property real launcherWidth: Settings.launcherWidth
     readonly property real launcherSearchHeight: 58
     readonly property real launcherRowHeight: 46
 
@@ -84,7 +108,7 @@ QtObject {
     // turns. Sized for the smaller of the two, the wallpaper picker, and
     // rounded to a whole number of app rows so the list never comes to rest
     // halfway through one.
-    readonly property int launcherRows: 7
+    readonly property int launcherRows: Settings.launcherRows
     readonly property real launcherBodyHeight: launcherRows * launcherRowHeight + 12
 
     // A name column narrow enough to stay a column, leaving the rest to the
@@ -100,84 +124,42 @@ QtObject {
     // reads as lower than centre once the results push the sheet downward.
     readonly property real launcherRise: 60
 
-    readonly property int launcherOpenDur: 200
-    readonly property int launcherCloseDur: 140
+    readonly property int launcherOpenDur: _dur(200)
+    readonly property int launcherCloseDur: _dur(140)
 
-    // Applications the launcher must never show. Each entry matches either the
-    // desktop id — the .desktop filename without its extension, which is often
-    // nothing like the visible name ("bssh" is "Avahi SSH Server Browser") —
-    // or the name itself, case-insensitively. A trailing `*` matches a prefix,
-    // so one line can hide a whole family:
-    //
-    //     readonly property var hiddenApps: ["Avahi *", "cmake", "htop"]
-    //
-    // Entries are filtered out of `Apps.all`, so nothing here has to line up
-    // with the scan; editing this list is a config edit, which reloads the
-    // shell, so the launcher is filtered from the very next time it opens.
-    readonly property var hiddenApps: []
+    // Applications the launcher must never show — `launcher.hidden_apps`.
+    readonly property var hiddenApps: Settings.hiddenApps
 
     // ═════════════════════════════════════════════════════════════
     //  System integration — the parts that touch YOUR machine
     // ═════════════════════════════════════════════════════════════
     //
-    // Everything else in this file is taste. This block is the whole of what
-    // the shell hands to the outside world: a few commands, a few paths. It
-    // is the first place to look when something in the UI does nothing on a
-    // fresh install, and the only block most people need to edit.
+    // All of it comes from the `system` block of shell.conf, which is where
+    // it is documented. Nothing is decided here: these are pass-throughs, so
+    // that the rest of the shell keeps reading one place for its tokens.
 
-    // How a `Terminal=true` .desktop entry gets a terminal. The entry's own
-    // argv is appended to this.
-    readonly property var terminalCommand: ["kitty", "-e"]
+    // A terminal for a `Terminal=true` .desktop entry; the entry's own argv
+    // is appended to this.
+    readonly property var terminalCommand: Settings.terminal
 
-    // ── Hyprland dispatch grammar ────────────────────────────────
-    // Vanilla Hyprland takes plain dispatcher syntax (`workspace 3`). A
-    // Lua-configured Hyprland — the hyprglass plugin, and anything else that
-    // replaces hyprland.conf with hyprland.lua — routes `hyprctl dispatch`
-    // through a Lua interpreter instead and wants an expression
-    // (`hl.dsp.focus({ workspace = 3 })`). The two are not interchangeable
-    // and the wrong one fails without a visible error, which makes this
-    // exactly the kind of thing to detect rather than to ask about.
-    //
-    //   "auto"    probe once at startup and use whichever answers  (default)
-    //   "native"  plain dispatchers — vanilla Hyprland
-    //   "lua"     Lua expressions — hyprglass and friends
-    readonly property string hyprlandDispatch: "auto"
+    // "auto" | "native" | "lua" — see services/Hypr.qml.
+    readonly property string hyprlandDispatch: Settings.hyprlandDispatch
 
-    // Keyboard layouts in the order `kb_layout` lists them, as the two-letter
-    // codes the notch shows. Must match your Hyprland input config, because
-    // the segmented switch in the layout transient indexes into this.
-    readonly property var layoutCodes: ["en", "ru"]
+    // Keyboard layouts in the order `kb_layout` lists them.
+    readonly property var layoutCodes: Settings.keyboardLayouts
 
-    // ── wallpapers ───────────────────────────────────────────────
-    // Where the picker looks, relative to $HOME.
-    readonly property string wallpaperDir: "Pictures/Wallpapers"
+    // Where the picker looks, relative to $HOME, and what it counts as an
+    // image.
+    readonly property string wallpaperDir: Settings.wallpaperDir
     readonly property var wallpaperFormats: ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"]
 
-    // Setting a wallpaper is two jobs, and they are separate on purpose so
-    // either can be swapped or switched off. In both templates:
-    //
-    //     %f   the image path, already shell-quoted
-    //     %x   \
-    //           > where on screen the choice was made, in the wallpaper
-    //     %y   /  daemon's coordinates (origin bottom-left)
-    //
-    // `%x`/`%y` let the new picture grow out of the thumbnail that was
-    // clicked. Drop them and the transition falls back to whatever the
-    // daemon does by default.
-    //
-    // swww users: the drop-in equivalent is
-    //     "swww img %f --resize crop --transition-type grow
-    //      --transition-pos %x,%y --transition-duration 1.1 --transition-fps 60"
-    readonly property string wallpaperCommand: "awww img %f --resize crop --transition-type grow --transition-pos %x,%y --transition-duration 1.1 --transition-fps 60"
-
-    // Regenerating the colour scheme from the new wallpaper. This is what
-    // re-themes the shell: Theme.qml watches ~/.cache/wal/colors.json, so the
-    // panel, the accent and every tone step follow on their own. Set it to ""
-    // to keep a fixed palette and only ever change the picture.
-    //
-    // `-n` tells pywal not to set the wallpaper itself — that job is already
-    // done by the line above, through a daemon pywal knows nothing about.
-    readonly property string paletteCommand: "wal --backend schemer2 -n -i %f"
+    // Putting the picture up, and recolouring the shell from it. Two jobs,
+    // separate on purpose so either can be swapped or switched off. `%f` is
+    // the image; `%x` / `%y` are where on screen the choice was made.
+    readonly property string wallpaperCommand: Settings.wallpaperCommand
+    // Theme.qml watches ~/.cache/wal/colors.json, so whatever this writes
+    // re-themes the running shell on its own.
+    readonly property string paletteCommand: Settings.paletteCommand
 
     // ─────────────────────────────────────────────────────────────
     //  Drag
@@ -194,16 +176,18 @@ QtObject {
     //  Timing (ms)
     // ─────────────────────────────────────────────────────────────
 
-    readonly property int peekDur: 210      // hidden ↔ peek
-    readonly property int expandDur: 360     // peek ↔ expanded
-    readonly property int collapseDur: 280   // expanded → peek
-    readonly property int dismissDur: 380    // expanded → hidden, in one go
-    readonly property int snapDur: 250       // post-drag settle
-    readonly property int widthDur: 210      // transient re-sizing the peek
-    readonly property int contentFadeDur: 150
-    readonly property int pageDur: 280       // Command Center page transition
+    readonly property int peekDur: _dur(210)      // hidden ↔ peek
+    readonly property int expandDur: _dur(360)    // peek ↔ expanded
+    readonly property int collapseDur: _dur(280)  // expanded → peek
+    readonly property int dismissDur: _dur(380)   // expanded → hidden, in one go
+    readonly property int snapDur: _dur(250)      // post-drag settle
+    readonly property int widthDur: _dur(210)     // transient re-sizing the peek
+    readonly property int contentFadeDur: _dur(150)
+    readonly property int pageDur: _dur(280)      // Command Center page transition
 
-    readonly property int transientTtl: 1700 // how long a status lingers
+    // How long a status lingers — `notch.status_time`. Not scaled by the
+    // animation speed: it is a reading time, not a movement.
+    readonly property int transientTtl: Settings.statusTime
 
     // ─────────────────────────────────────────────────────────────
     //  Media

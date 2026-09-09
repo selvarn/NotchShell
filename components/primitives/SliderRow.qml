@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // Horizontal slider with a leading icon that doubles as a toggle. The whole
 // track is the drag surface (iOS-style), and the fill uses the accent so the

@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
-import "../"
 import "../core"
 
 // One full-screen overlay per monitor. It never draws a background and its

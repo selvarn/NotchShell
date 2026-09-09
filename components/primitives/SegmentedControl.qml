@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // Two-or-more segment switch with an indicator that physically travels
 // between positions: a spring carries it, and it stretches along the

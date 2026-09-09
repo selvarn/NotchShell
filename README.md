@@ -99,18 +99,23 @@ Check that it works in a terminal:
 schemer2 --help
 ```
 
-Then set the backend in `~/.config/quickshell/Config.qml`:
-```q
-readonly property string paletteCommand: "wal --backend schemer2 -n -i %f"
+The shell already calls it this way; the line is in `~/.config/quickshell/shell.conf`
+if you ever need a different backend:
+```ini
+system {
+    palette_command = wal --backend schemer2 -n -i %f
+}
 ```
 
 **5. Pick a wallpaper directory**
 
-If you use `awww`, wallpapers are looked up in `~/Pictures/Wallpapers` by default.
-The path can be changed in `~/.config/quickshell/Config.qml`:
+Wallpapers are looked up in `~/Pictures/Wallpapers` by default. The path lives in
+`~/.config/quickshell/shell.conf`:
 
-```q
-readonly property string wallpaperDir: "Pictures/Wallpapers"
+```ini
+system {
+    wallpapers = Pictures/Wallpapers
+}
 ```
 
 **6. Autostart**
@@ -138,13 +143,36 @@ hl.bind(mainMod .. " + T",     hl.dsp.exec_cmd("qs ipc call launcher walls"))
 
 ## Configuration
 
-The main settings live in two files:
-- `Config.qml`
-- `Theme.qml`
+Everything you can change lives in one file: **`~/.config/quickshell/shell.conf`**.
+Save it and the running shell picks it up — no restart.
 
-Both are QML singletons, so changes apply on save and QuickShell reloads the configuration automatically.
+```ini
+look {
+    theme    = auto        # auto | dark | light
+    accent   = auto        # auto | #7aa2f7
+    rounding = soft        # sharp | soft | round
+    font     = Inter
+}
 
-Most parameters can be changed directly in these files. The comments inside them describe the available settings in more detail.
+notch  { width = 172   height = 34   status_time = 1.7 }
+panel  { width = 500   animation_speed = 1.0 }
+launcher { width = 640   rows = 7   hidden_apps = }
+
+system {
+    terminal         = kitty -e
+    wallpapers       = Pictures/Wallpapers
+    keyboard_layouts = en, ru
+}
+```
+
+That is the whole surface, on purpose. It is a short list of decisions rather than a
+mirror of the internals: pick a roundness, not eleven radii; one animation speed, not
+nine durations. Every value is validated and clamped, so a typo or a missing file
+leaves the shell running on its defaults instead of breaking it.
+
+The rest — the tone ladder derived from your wallpaper, the notch's shape schedule,
+the motion curves — is the program's business and lives in `core/`. You are welcome
+to edit it, but you should never have to.
 
 ---
 ##  How to use it

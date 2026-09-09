@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import ".."
+import "../core"
 
 // The installed applications, read straight from the `.desktop` files.
 //

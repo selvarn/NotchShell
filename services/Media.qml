@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
-import ".."
+import "../core"
 
 // The one MPRIS player the Command Center shows.
 //

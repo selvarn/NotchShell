@@ -1,5 +1,4 @@
 import QtQuick
-import "../../"
 import "../../core"
 
 // Routes UiState.current → the matching status view. All four views stay

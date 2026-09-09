@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
-import ".."
+import "../core"
 
 // Thin, opinionated wrapper over Quickshell's native Hyprland integration.
 //

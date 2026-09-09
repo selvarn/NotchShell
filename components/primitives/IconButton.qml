@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // Round icon button used by the media transport and page headers.
 Rectangle {

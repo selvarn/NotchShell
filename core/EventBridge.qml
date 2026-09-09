@@ -1,6 +1,6 @@
 import QtQuick
-import "../"
 import "../services"
+import "."
 
 // Turns system events into transient notch statuses. Instantiated once by
 // shell.qml. Keeps that wiring out of both the services (which shouldn't

@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell.Widgets
-import "../../"
 import "../../core"
 import "../../services"
 import "../primitives"

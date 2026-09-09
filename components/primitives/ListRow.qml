@@ -1,5 +1,4 @@
 import QtQuick
-import "../.."
 import "../../core"
 
 // A row inside a drill-down page: small leading glyph, label + sublabel, and

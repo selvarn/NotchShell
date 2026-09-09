@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import "../../"
 import "../../core"
 import "../../services"
 import "../primitives"

@@ -99,18 +99,23 @@ go install github.com/thefryscorer/schemer2
 schemer2 --help
 ```
 
-После этого укажите backend в `~/.config/quickshell/Config.qml`:
-```q
-readonly property string paletteCommand: "wal --backend schemer2 -n -i %f"
+Шелл уже вызывает его именно так; строка лежит в `~/.config/quickshell/shell.conf`,
+если понадобится другой backend:
+```ini
+system {
+    palette_command = wal --backend schemer2 -n -i %f
+}
 ```
 
 **5. Выбор директории для обоев**
 
-Если вы используете `awww`, по умолчанию обои ищутся в `~/Pictures/Wallpapers`.
-Путь можно изменить в `~/.config/quickshell/Config.qml`:
+По умолчанию обои ищутся в `~/Pictures/Wallpapers`. Путь лежит в
+`~/.config/quickshell/shell.conf`:
 
-```q
-readonly property string wallpaperDir: "Pictures/Wallpapers"
+```ini
+system {
+    wallpapers = Pictures/Wallpapers
+}
 ```
 
 **6. Автозапуск**
@@ -138,13 +143,37 @@ hl.bind(mainMod .. " + T",     hl.dsp.exec_cmd("qs ipc call launcher walls"))
 
 ## Настройка
 
-Основные настройки находятся в двух файлах:
-- `Config.qml`
-- `Theme.qml`
+Всё, что можно менять, лежит в одном файле: **`~/.config/quickshell/shell.conf`**.
+Сохранили — запущенный шелл подхватил, перезапускать не нужно.
 
-Оба файла являются QML-синглтонами, поэтому изменения применяются при сохранении, а QuickShell автоматически перезагружает конфигурацию.
+```ini
+look {
+    theme    = auto        # auto | dark | light
+    accent   = auto        # auto | #7aa2f7
+    rounding = soft        # sharp | soft | round
+    font     = Inter
+}
 
-Большинство параметров можно изменить напрямую в этих файлах. Подробнее о доступных настройках можно узнать из комментариев внутри них.
+notch  { width = 172   height = 34   status_time = 1.7 }
+panel  { width = 500   animation_speed = 1.0 }
+launcher { width = 640   rows = 7   hidden_apps = }
+
+system {
+    terminal         = kitty -e
+    wallpapers       = Pictures/Wallpapers
+    keyboard_layouts = en, ru
+}
+```
+
+Это вся поверхность настройки — и так задумано. Это список решений, а не зеркало
+внутренностей: выбирается округлость, а не одиннадцать радиусов; одна скорость
+анимации, а не девять длительностей. Каждое значение проверяется и зажимается в
+разумные пределы, поэтому опечатка или отсутствующий файл оставляют шелл на
+значениях по умолчанию, а не ломают его.
+
+Всё остальное — тональная лестница, выведенная из обоев, расписание морфинга чёлки,
+кривые движения — дело самой программы и живёт в `core/`. Править это можно, но не
+должно быть нужно.
 
 ---
 ##  Как пользоваться?

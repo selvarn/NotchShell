@@ -3,7 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import ".."
+import "../core"
 
 // Night light — a warm tint applied to the whole screen by hyprsunset.
 //

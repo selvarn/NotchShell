@@ -1,6 +1,6 @@
 import QtQuick
-import "../../"
 import "../../services"
+import "../../core"
 
 // Compact workspace strip: a dot per workspace, the active one stretched into
 // a numbered capsule. The stretch animates so a switch reads as motion.

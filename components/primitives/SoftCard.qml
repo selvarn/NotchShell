@@ -1,5 +1,5 @@
 import QtQuick
-import "../.."
+import "../../core"
 
 // A soft-UI surface: a quiet tone step above the panel, generously rounded,
 // no glass and no hard border. Depth is tone + roundness, not translucency.

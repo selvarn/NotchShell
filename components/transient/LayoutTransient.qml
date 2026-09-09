@@ -1,7 +1,7 @@
 import QtQuick
-import "../../"
 import "../../services"
 import "../primitives"
+import "../../core"
 
 // Keyboard layout, shown as a two-position switch rather than a label.
 // Only the short codes appear — "en" / "ru", lowercase, nothing else — and
