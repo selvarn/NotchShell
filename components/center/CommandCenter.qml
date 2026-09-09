@@ -23,7 +23,12 @@ Item {
     // How far the outgoing page drifts — a parallax nudge, not a full swap.
     readonly property real slide: contentWidth * 0.28
 
+    // The chrome band at the foot of the sheet: the grabber pill, the gap
+    // above it and the sheet's own bottom padding. The notch takes its drag
+    // zone from this, so the band the user grabs is exactly the band that
+    // holds no controls.
     readonly property real _grabberBlock: 4 + Config.gap
+    readonly property real grabZone: pad + _grabberBlock
 
     readonly property real _activeHeight: {
         switch (CenterNav.page) {
@@ -83,10 +88,15 @@ Item {
         acceptedButtons: Qt.AllButtons
     }
 
-    // Pull grabber — pinned, never slides with the pages.
+    // Pull grabber — pinned to the sheet's bottom edge, never slides with
+    // the pages. It lives down here rather than up top because the sheet
+    // hangs from the top bezel: a handle at its head leaves nowhere to pull
+    // *to*, the pointer runs out of screen before the gesture registers.
+    // At the foot it travels with the growing edge, and closing is a pull
+    // back up into the bezel with the whole screen to do it in.
     Rectangle {
         id: grabber
-        y: center.pad
+        y: center.height - center.pad - height
         anchors.horizontalCenter: parent.horizontalCenter
         width: 34
         height: 4
@@ -98,9 +108,9 @@ Item {
     Item {
         id: viewport
         x: center.pad
-        y: center.pad + center._grabberBlock
+        y: center.pad
         width: center.contentWidth
-        height: Math.max(0, center.height - y - center.pad)
+        height: Math.max(0, center.height - y - center.grabZone)
         clip: true
 
         RootPage {

@@ -140,19 +140,28 @@ Item {
 
     // ── drag + tap + hover ──────────────────────────────────────
     // Grab zone: the whole peek (generously padded so a 34 px lip is still
-    // catchable), or just a header strip once expanded so the Command
-    // Center body stays interactive. Collapses to nothing when the notch is
-    // fully hidden — otherwise it stays in the window's input mask and
-    // silently eats clicks meant for whatever is underneath.
+    // catchable), or the sheet's foot once expanded — the band that holds
+    // the grabber and no controls, so the Command Center body stays
+    // interactive. Collapses to nothing when the notch is fully hidden —
+    // otherwise it stays in the window's input mask and silently eats
+    // clicks meant for whatever is underneath.
+    //
+    // Both forms end at the same edge and grow upward from it, so the switch
+    // between them never moves the zone out from under a pointer that is
+    // mid-drag: at the crossover the sheet is barely taller than the peek
+    // and the two bands are all but the same strip.
     Item {
         id: hitArea
 
         readonly property bool live: UiState.peekVisible
+        // Just below the body while peeking (a catchable lip), the body's
+        // own bottom edge once the sheet is open (past it is click-away).
+        readonly property real grabBottom: visual.y + body.y + body.height + (UiState.centerVisible ? 0 : 22)
 
         x: visual.x + body.x + body.width / 2 - width / 2
-        y: 0
+        y: live ? Math.max(0, grabBottom - height) : 0
         width: live ? Math.max(Config.hoverStripWidth, body.width + 32) : 0
-        height: !live ? 0 : UiState.centerVisible ? 44 : (body.y + body.height + 22)
+        height: !live ? 0 : UiState.centerVisible ? commandCenter.grabZone : grabBottom
         z: 10
 
         DragHandler {
