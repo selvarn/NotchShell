@@ -1,8 +1,6 @@
 **English** · [Русский](README.ru.md)
 
-https://github.com/user-attachments/assets/f58f5b73-64a2-4866-af6e-d03596450f3d
-
-
+https://github.com/user-attachments/assets/59c4dd8a-f504-48e2-a2dd-36fd9b4a021f
 
 ## NotchShell
 
