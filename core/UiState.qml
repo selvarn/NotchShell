@@ -71,6 +71,34 @@ QtObject {
     // arguing with the first.
     readonly property bool centerOpen: intent === "expanded" || centerVisible
 
+    // ── the peek always belongs to someone ──────────────────────
+    // A peek exists for exactly two reasons: the pointer is on the notch, or
+    // a transient status is being shown. Nothing else may leave the shell
+    // sitting at `peek`, because nothing else has a way back out —
+    // `_syncHover` retires a peek only on a hovering true→false *edge*, and
+    // a peek that was never hover-driven has no such edge coming. That is
+    // how the Command Center used to end its life as a notch that hung on
+    // screen forever: some path (a stray re-grab mid-collapse, a status that
+    // slipped in during the dismissal) parked `intent` at "peek" with no
+    // hover and no transient, and there it stayed.
+    //
+    // Every such path is a bug and is fixed at its source; this is the net
+    // underneath them. It fires while the shape is still on its way down, so
+    // the correction is invisible — the collapse simply continues to hidden
+    // instead of stopping halfway.
+    readonly property bool peekOrphaned: intent === "peek" && !hovering && !dragging && current === null
+    onPeekOrphanedChanged: if (peekOrphaned)
+                               _orphanGuard.restart()
+
+    property Timer _orphanGuard: Timer {
+        // A beat rather than zero: state lands in pieces (a transient is
+        // assigned the frame before the peek it raises), and retiring inside
+        // that gap would fight whatever is still settling.
+        interval: 50
+        onTriggered: if (state.peekOrphaned)
+                         state.toHidden()
+    }
+
     // ── transient status queue ──────────────────────────────────
     // current: { kind: string, data: object, priority: int, ttl: int } | null
     property var current: null
@@ -166,17 +194,31 @@ QtObject {
     // the hover strip until the pointer has actually left, so closing the
     // sheet cannot summon the very thing it just closed.
     function dismiss() {
+        _leave("dismiss");
+    }
+
+    // The whole of dismissal apart from its timing. A drag that lets the
+    // sheet go shares every part of this — including the hover block, which
+    // matters *more* for a drag: the pointer is necessarily still on the
+    // notch at release, so without it the hover strip answers immediately
+    // and re-summons the peek the release just closed.
+    function _leave(mode) {
         // A live transient still owns the notch and has its own TTL; let it
         // finish in the peek rather than cutting it off.
         if (current) {
             toPeek();
             return;
         }
-        _hoverBlocked = true;
+        // Block only a pointer that is actually on one of the hover
+        // surfaces — that is the whole point of the flag, and it clears on
+        // the pointer's next departure. Arming it unconditionally means a
+        // close performed from anywhere else (a keybind, a click across the
+        // screen) silently eats the user's next approach to the strip.
+        _hoverBlocked = _stripHover || _bodyHover;
         _hoverLatch = false;
         hovering = false;
         intent = "hidden";
-        _animate(0, "dismiss");
+        _animate(0, mode);
     }
 
     function toggleExpanded() {
@@ -241,10 +283,27 @@ QtObject {
 
     // ── drag interaction ────────────────────────────────────────
     property real _dragStart: 0
+    // Whether this drag picked the notch up with the sheet already open.
+    // Letting go of an open sheet is a dismissal, not a return to peek —
+    // see dragEnd().
+    property bool _dragFromCenter: false
 
     function dragBegin() {
+        // The notch is already retiring under a pointer that never lifted.
+        // Qt hands the handler back mid-collapse — the grab is cancelled as
+        // the shape shrinks past the pointer, then re-taken while the button
+        // is still down — and that second activation is not a new gesture:
+        // it is the tail of the one the shell has already answered. Acting
+        // on it re-opens a sheet the user just closed, or (worse) releases
+        // into a peek nobody asked for. `_hoverBlocked` is precisely the
+        // "dismissed out from under this pointer" flag, and it clears the
+        // moment the pointer actually leaves.
+        if (_hoverBlocked && intent === "hidden")
+            return;
+
         dragging = true;
         _dragStart = progress;
+        _dragFromCenter = centerOpen;
     }
 
     // pullPx: downward pointer travel since press (negative = upward)
@@ -271,13 +330,25 @@ QtObject {
         if (projected >= commit) {
             intent = "expanded";
             _animate(1, "snap");
-        } else if (projected <= peekStop * 0.45 && !hovering && !current) {
-            intent = "hidden";
-            _animate(0, "snap");
-        } else {
-            intent = "peek";
-            _animate(peekStop, "snap");
+            return;
         }
+
+        // Two ways a release goes all the way out rather than settling at
+        // the peek:
+        //
+        //   • it let the sheet go. Closing the Command Center is a
+        //     dismissal, and a dismissal never stops at the peek — the same
+        //     reasoning as dismiss(), only the timing differs.
+        //   • nothing owns a peek here. The pointer is not hovering and no
+        //     transient is live, so the notch would be left out with nothing
+        //     coming to take it back in.
+        if (_dragFromCenter || !(hovering || current)) {
+            _leave("snap");
+            return;
+        }
+
+        intent = "peek";
+        _animate(peekStop, "snap");
     }
 
     // ── internals ───────────────────────────────────────────────
