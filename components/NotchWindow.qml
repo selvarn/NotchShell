@@ -71,7 +71,21 @@ PanelWindow {
         height: Config.hoverStripHeight
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
+
         HoverHandler { id: stripHover }
+
+        // Presence is what the HoverHandler above answers; this answers
+        // *movement*, which the handler does not report. A cursor that
+        // closed the sheet by touching the notch is spent until it moves
+        // again, and that has to be answerable without the user waving the
+        // mouse off the strip and back for the shell to notice. No buttons:
+        // presses belong to the notch, which sits above this.
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onPositionChanged: UiState.pointerMoved()
+        }
     }
 
     // Click-away scrim. Zero-size (contributes nothing to the mask) unless

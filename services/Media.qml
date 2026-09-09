@@ -2,6 +2,7 @@ pragma Singleton
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Mpris
 import ".."
 
@@ -141,6 +142,62 @@ QtObject {
             length = rawLength;
     }
 
+    // ── asking the player itself ────────────────────────────────
+    //
+    // Metadata reaches the shell as a *signal*, so a player that learns
+    // something and does not announce it leaves the cached copy wrong for as
+    // long as it likes. A browser knows a video's duration a moment after
+    // playback starts but only republishes metadata at the next play/pause —
+    // which is exactly "the bar only turns up once I pause it". The Metadata
+    // property itself is right the whole time.
+    //
+    // So a player that is showing no length gets asked directly, a few times,
+    // and is then left alone. Same rule as everything else here: a player
+    // that has not said anything is not a player that said "nothing".
+    property int _askLeft: 0
+    property string _askKey: ""
+
+    property Process _ask: Process {
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var m = ("" + text).match(/'mpris:length':\s*<int64\s+(\d+)>/);
+                if (!m)
+                    return;
+                var secs = parseInt(m[1], 10) / 1000000;
+                // The answer belongs to the track it was asked about, and
+                // only fills a silence — a player that has since spoken for
+                // itself outranks it.
+                if (secs > 0 && media._askKey === media.trackKey && media.rawLength <= 0) {
+                    media._lengthKey = media.trackKey;
+                    media.length = secs;
+                    media._askLeft = 0;
+                }
+            }
+        }
+        onExited: code => {
+            // No gdbus, or a player that will not answer: stop asking.
+            if (code !== 0)
+                media._askLeft = 0;
+        }
+    }
+
+    property Timer _askTimer: Timer {
+        interval: Config.lengthAskMs
+        repeat: true
+        triggeredOnStart: true
+        // Only while the answer is wanted on screen, and only while there is
+        // still a question to ask.
+        running: media.polling && media.available && !media.hasLength && media._askLeft > 0
+        onTriggered: {
+            if (media._ask.running || !media.player.dbusName)
+                return;
+            media._askLeft -= 1;
+            media._askKey = media.trackKey;
+            media._ask.command = ["gdbus", "call", "--session", "--dest", media.player.dbusName, "--object-path", "/org/mpris/MediaPlayer2", "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Metadata"];
+            media._ask.running = true;
+        }
+    }
+
     // Whether there is a timeline to draw at all. A live stream never reports
     // a length, and the card shows transport only rather than a bar that can
     // never fill.
@@ -160,16 +217,24 @@ QtObject {
     property real position: 0
     readonly property real progress: hasLength ? Config.clamp(position / length, 0, 1) : 0
 
-    // A seek is a round trip: until the player answers, it still reports the
-    // old position. Hold the requested one over the top for a moment so the
-    // bar stays where it was dropped instead of snapping back and then
-    // jumping forward again.
+    // A seek is a round trip, and a browser answers it in two parts: it
+    // accepts the new position long before it has the picture to show
+    // there. The requested spot is therefore held over the player's own
+    // clock until that clock *arrives* at it — not for a fixed grace, which
+    // cannot know how long a buffer takes and let the bar leave the drop
+    // point and fall back onto it.
     property real _seekHold: -1
+    property real _seekDeadline: 0
+    // When the user last put the bar somewhere. A player only runs ahead of
+    // its own picture just after being sent there, so that is the only
+    // window in which a step backwards is read as a correction rather than
+    // as somebody seeking.
+    property real _seekAt: -1
 
-    property Timer _seekGrace: Timer {
-        interval: 700
-        onTriggered: media._seekHold = -1
-    }
+    // Set while the readout is waiting for a player whose clock ran ahead of
+    // its picture: the instant (ms) after which we stop waiting and take
+    // whatever the player says. Zero means nothing is being waited out.
+    property real _catchUpUntil: 0
 
     property Timer _poll: Timer {
         // Frame rate, not once a second: this is a local read, not a bus
@@ -195,12 +260,43 @@ QtObject {
         // call to a service that is no longer there.
         if (!available || !player.positionSupported) {
             media.position = 0;
+            media._catchUpUntil = 0;
             return;
         }
-        var t = media._seekHold >= 0 ? media._seekHold : player.position;
+
+        var now = Date.now();
+        var raw = player.position;
+
+        // Has the player arrived where it was sent? Its clock passes through
+        // the requested spot and then drifts on from there, so "arrived" is
+        // a window rather than equality. Failing that, a player that has
+        // plainly not taken the seek does not get to hold the bar forever.
+        if (media._seekHold >= 0 && (Math.abs(raw - media._seekHold) <= Config.seekConfirmSlack || now > media._seekDeadline))
+            media._seekHold = -1;
+
+        var held = media._seekHold >= 0;
+        var t = held ? media._seekHold : raw;
         // A player whose clock has drifted past the end would otherwise
         // print a readout longer than the track.
-        media.position = hasLength ? Config.clamp(t, 0, length) : Math.max(0, t);
+        t = hasLength ? Config.clamp(t, 0, length) : Math.max(0, t);
+
+        // The readout does not walk backwards on its own. A player that is
+        // still fetching the picture keeps counting anyway, then corrects
+        // itself the moment the picture lands — so the seconds it invented
+        // would be played a second time, in reverse. Wait the correction out
+        // where we are instead; the player catches up within its own stall.
+        // A jump too far back or a wait too long is not that: it is somebody
+        // seeking, and it is followed at once.
+        var settling = media._seekAt >= 0 && now - media._seekAt < Config.posSettleMs;
+        if (!held && settling && t < media.position - Config.posRewindSlack && media.position - t <= Config.posCatchUpMax) {
+            if (media._catchUpUntil === 0)
+                media._catchUpUntil = now + Config.posCatchUpMs;
+            if (now < media._catchUpUntil)
+                return;
+        }
+
+        media._catchUpUntil = 0;
+        media.position = t;
     }
 
     // ── transport ───────────────────────────────────────────────
@@ -222,8 +318,10 @@ QtObject {
             return;
         var t = Config.clamp(f, 0, 1) * length;
         media._seekHold = t;
+        media._seekDeadline = Date.now() + Config.seekConfirmMs;
+        media._seekAt = Date.now();
+        media._catchUpUntil = 0;
         media.position = t;
-        media._seekGrace.restart();
         media.player.position = t;
     }
 
@@ -263,11 +361,21 @@ QtObject {
         function onRawLengthChanged() {
             media._refreshLength();
         }
+        // Someone has opened the sheet: if the length is still missing, it
+        // is worth asking again — the run of questions may have been spent
+        // minutes ago, on a track that has since learned its own duration.
+        function onPollingChanged() {
+            if (media.polling && !media.hasLength)
+                media._askLeft = Config.lengthAskTries;
+        }
     }
 
     function _reset() {
         media._seekHold = -1;
-        media._seekGrace.stop();
+        media._seekAt = -1;
+        media._catchUpUntil = 0;
+        // A new track earns a fresh set of questions.
+        media._askLeft = Config.lengthAskTries;
         media._refreshLength();
         media._sync();
     }

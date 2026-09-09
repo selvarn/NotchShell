@@ -206,6 +206,36 @@ QtObject {
     readonly property int transientTtl: 1700 // how long a status lingers
 
     // ─────────────────────────────────────────────────────────────
+    //  Media
+    // ─────────────────────────────────────────────────────────────
+
+    // A seek is a round trip, and a browser answers it in two parts: it
+    // takes the new position long before it has a picture to show there.
+    // The requested spot is held over the player's own clock until that
+    // clock arrives at it (within `seekConfirmSlack`), and no longer than
+    // `seekConfirmMs` in case the player never takes the seek at all.
+    readonly property int seekConfirmMs: 6000
+    readonly property real seekConfirmSlack: 2.5   // s
+
+    // A player that has not announced a length is asked for one directly,
+    // this often and no more times than this, then left alone — a live
+    // stream has no length to give and must not be interrogated forever.
+    readonly property int lengthAskMs: 800
+    readonly property int lengthAskTries: 10
+
+    // Answers that differ by less than this are the same answer.
+    readonly property real posRewindSlack: 0.6     // s
+    // A clock that ran ahead of its picture corrects itself backwards once
+    // the picture arrives. For this long after a scrub the readout waits
+    // that correction out where it stands rather than replaying the same
+    // seconds in reverse — but only this far back and for this long. Outside
+    // the window, and beyond these limits, a step backwards is somebody
+    // seeking in the player itself and is followed at once.
+    readonly property int posSettleMs: 20000
+    readonly property real posCatchUpMax: 20       // s
+    readonly property int posCatchUpMs: 15000
+
+    // ─────────────────────────────────────────────────────────────
     //  Motion — shared easing so nothing invents its own curve
     // ─────────────────────────────────────────────────────────────
 

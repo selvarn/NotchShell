@@ -185,7 +185,9 @@ Item {
             acceptedButtons: Qt.LeftButton
             onTapped: {
                 if (UiState.wantExpanded)
-                    UiState.dismiss();
+                    // Closed by the pointer, on the notch: that cursor does
+                    // not get the peek back until it moves.
+                    UiState.dismiss(true);
                 else
                     UiState.toExpanded();
             }
