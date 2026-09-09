@@ -35,6 +35,14 @@ QtObject {
     readonly property bool wantPeek: intent === "peek"
     readonly property bool wantExpanded: intent === "expanded"
 
+    // Opening the sheet retires whatever the notch was showing. A transient
+    // that was live when the sheet opened has been invisible ever since, and
+    // letting it survive its TTL under the panel would only mean `dismiss()`
+    // handing the peek back to a status the user has already read past.
+    // Covers the drag commit too, which sets `intent` directly.
+    onIntentChanged: if (intent === "expanded")
+                         _dropTransients()
+
     // ── the driver ──────────────────────────────────────────────
     property real progress: 0
     property bool dragging: false
@@ -55,6 +63,13 @@ QtObject {
     readonly property real expandFraction: Config.clamp((progress - peekStop) / (1 - peekStop), 0, 1)
     readonly property bool peekVisible: progress > 0.002
     readonly property bool centerVisible: progress > peekStop + 0.015
+
+    // True from the moment the sheet is committed to opening until it has
+    // visibly closed again. The Command Center is one focused surface: a
+    // status popping the notch out from under it — or sitting in the queue
+    // waiting to pop out the instant it closes — reads as a second window
+    // arguing with the first.
+    readonly property bool centerOpen: intent === "expanded" || centerVisible
 
     // ── transient status queue ──────────────────────────────────
     // current: { kind: string, data: object, priority: int, ttl: int } | null
@@ -174,6 +189,13 @@ QtObject {
     // Raise a transient status inside the notch. Same-kind calls coalesce
     // and refresh the timer instead of stacking.
     function notify(kind, data, opts) {
+        // Nothing pops out over the Command Center. Statuses are dropped,
+        // not deferred: a volume OSD — usually raised by the sheet's own
+        // slider — arriving seconds after the sheet closes is stale noise,
+        // and everything a transient reports is already on the sheet.
+        if (centerOpen)
+            return;
+
         opts = opts || {};
         var item = {
             kind: kind,
@@ -204,10 +226,17 @@ QtObject {
     }
 
     function clearTransient() {
+        _dropTransients();
+        _retireIfIdle();
+    }
+
+    // Empty the queue without touching `intent`. Unlike clearTransient(),
+    // this runs *while* the sheet is taking the notch over, so it must not
+    // try to retire a notch that something else now owns.
+    function _dropTransients() {
         _queue = [];
         current = null;
         _ttlTimer.stop();
-        _retireIfIdle();
     }
 
     // ── drag interaction ────────────────────────────────────────
