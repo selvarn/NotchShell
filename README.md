@@ -59,6 +59,45 @@ Every service probes its own availability at startup. If a component is not pres
 
 ## Installation
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/selvarn/NotchShell/master/install.sh | bash
+```
+
+The installer checks what you already have, lists what is missing and what each
+missing piece would cost you (every optional package is exactly one feature — the
+shell hides tiles it cannot drive), asks before installing anything, clones the shell
+into `~/.config/quickshell`, and creates your `shell.conf` from the template. It does
+**not** touch your Hyprland config: it prints the two lines to add and leaves the file
+to you.
+
+It also installs a `notchshell` command:
+
+```bash
+notchshell update      # pull the newest version — your settings are never touched
+notchshell status      # version, what is running, your settings, what is missing
+notchshell doctor      # the same checks plus the environment around the shell
+notchshell config      # edit your settings
+notchshell uninstall   # remove the program, asks before touching your settings
+```
+
+### Updating
+
+```bash
+notchshell update
+```
+
+It shows you what changed, fast-forwards the checkout and restarts the shell. Your
+`shell.conf` is in `.gitignore`, so git cannot see it — an update has no code path
+that could overwrite it. If a new version adds a setting, the updater says so and
+points at the template; your config keeps working without it, because every option
+has a default.
+
+If you have edited the program itself, the updater stops and offers to stash your
+changes rather than throwing them away.
+
+<details>
+<summary><b>Manual installation</b></summary>
+
 **1. Install the packages**
 
 Required packages:
@@ -139,6 +178,13 @@ hl.bind(mainMod .. " + Space", hl.dsp.exec_cmd("qs ipc call notch toggle"))
 hl.bind(mainMod .. " + T",     hl.dsp.exec_cmd("qs ipc call launcher walls"))
 ```
 
+**8. The `notchshell` command** (optional, but it is how you update)
+```bash
+ln -sf ~/.config/quickshell/tools/notchshell ~/.local/bin/notchshell
+```
+
+</details>
+
 ---
 
 ## Configuration
@@ -173,6 +219,12 @@ leaves the shell running on its defaults instead of breaking it.
 The rest — the tone ladder derived from your wallpaper, the notch's shape schedule,
 the motion curves — is the program's business and lives in `core/`. You are welcome
 to edit it, but you should never have to.
+
+**Yours vs the program's.** `shell.conf` is yours: it is git-ignored, so an update
+cannot see it, let alone overwrite it. Everything git tracks is the program's, and an
+update fast-forwards all of it — if you have edited those files by hand, the updater
+stops and asks rather than discarding your work. Your Hyprland config is yours too:
+nothing here ever writes to it.
 
 ---
 ##  How to use it

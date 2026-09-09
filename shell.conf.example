@@ -1,0 +1,100 @@
+# ┌───────────────────────────────────────────────────────────────┐
+# │  NotchShell                                                   │
+# │  This file is the whole config. Save it and the running       │
+# │  shell picks it up — no restart.                              │
+# │                                                               │
+# │  Every line below is a default: delete one and nothing        │
+# │  changes. Get one wrong and the shell keeps the default       │
+# │  rather than breaking.                                        │
+# └───────────────────────────────────────────────────────────────┘
+
+
+# ── look ────────────────────────────────────────────────────────
+look {
+    # auto follows the wallpaper: a bright picture gives a light shell.
+    #   auto | dark | light
+    theme = auto
+
+    # auto picks the most colourful shade out of the wallpaper.
+    #   auto | #7aa2f7
+    accent = auto
+
+    # How round everything is, as one decision.
+    #   sharp | soft | round   (or a number, 0 = square, 2 = very round)
+    rounding = soft
+
+    font = Inter
+    mono_font = JetBrains Mono
+}
+
+
+# ── the notch ───────────────────────────────────────────────────
+# The black lip that comes out of the top bezel on hover.
+notch {
+    width = 172
+    height = 34
+
+    # Seconds a status — volume, workspace, keyboard layout — stays out.
+    status_time = 1.7
+}
+
+
+# ── the Command Center ──────────────────────────────────────────
+# The panel the notch turns into when you pull it down.
+panel {
+    width = 500
+
+    # Multiplies every animation in the shell. Lower is quicker:
+    # 0.5 is twice as fast, 2 is half speed.
+    animation_speed = 1.0
+}
+
+
+# ── the launcher ────────────────────────────────────────────────
+launcher {
+    width = 640
+
+    # Visible rows. Both the app list and the wallpaper picker are always
+    # this tall, so tabbing between them never resizes the sheet.
+    rows = 7
+
+    # Applications to keep out of the list, comma separated. Matches either
+    # the .desktop id or the visible name, case-insensitively; a trailing
+    # star hides a whole family:
+    #
+    #   hidden_apps = Avahi *, htop, cmake
+    hidden_apps =
+}
+
+
+# ── your machine ────────────────────────────────────────────────
+# The only block that touches the outside world. If something in the UI
+# does nothing on a fresh install, look here first.
+system {
+    # How an app that asks for a terminal gets one.
+    terminal = kitty -e
+
+    # Where the wallpaper picker looks, relative to your home directory.
+    wallpapers = Pictures/Wallpapers
+
+    # Your keyboard layouts, in the order Hyprland lists them, written the
+    # way the notch should show them.
+    keyboard_layouts = en, ru
+
+    # Vanilla Hyprland takes plain dispatchers; a Lua-configured one (the
+    # hyprglass plugin) wants Lua expressions. auto tries both once at
+    # startup and keeps whichever answers.
+    #   auto | native | lua
+    hyprland_dispatch = auto
+
+    # Setting a wallpaper is two jobs: putting the picture up, and
+    # recolouring the shell from it. Both are optional overrides — the
+    # defaults are shown. In them, %f is the image and %x / %y are where on
+    # screen you clicked, so the new picture grows out of the thumbnail.
+    #
+    #   wallpaper_command = swww img %f --resize crop --transition-type grow --transition-pos %x,%y --transition-duration 1.1 --transition-fps 60
+    #   palette_command   = wal --backend schemer2 -n -i %f
+    #
+    # Set palette_command to nothing to keep a fixed palette and only ever
+    # change the picture.
+}

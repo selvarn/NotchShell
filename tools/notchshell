@@ -1,0 +1,615 @@
+#!/usr/bin/env bash
+#
+# notchshell — install, update and check NotchShell.
+#
+# The whole point of this script is one line: your settings are yours, and an
+# update may never touch them. That line runs through everything below.
+#
+#   PROGRAM   everything git tracks — shell.qml, core/, components/, services/,
+#             shell.conf.example, this script. Owned by the repository. An
+#             update fast-forwards it, and refuses to throw away local edits
+#             without asking first.
+#
+#   YOURS     shell.conf, and nothing else. It is in .gitignore, so git cannot
+#             see it, which means no update can overwrite it — not by policy,
+#             but because there is no code path that could. Your Hyprland
+#             config is yours too: this script only ever prints what to add.
+#
+# Usage: notchshell <command>
+set -euo pipefail
+
+NOTCHSHELL_VERSION_MIN_BASH=4
+
+SHELL_DIR="${NOTCHSHELL_DIR:-$HOME/.config/quickshell}"
+CONFIG="$SHELL_DIR/shell.conf"
+EXAMPLE="$SHELL_DIR/shell.conf.example"
+BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+REPO_URL="${NOTCHSHELL_REPO:-https://github.com/selvarn/NotchShell.git}"
+BRANCH="${NOTCHSHELL_BRANCH:-master}"
+ASSUME_YES="${NOTCHSHELL_YES:-0}"
+SKIP_DEPS="${NOTCHSHELL_NO_DEPS:-0}"
+
+# ── output ───────────────────────────────────────────────────────────────
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    B=$'\e[1m'; DIM=$'\e[2m'; R=$'\e[0m'
+    RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLU=$'\e[34m'
+else
+    B=""; DIM=""; R=""; RED=""; GRN=""; YLW=""; BLU=""
+fi
+
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n%s==>%s %s%s%s\n' "$BLU" "$R" "$B" "$*" "$R"; }
+ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
+miss() { printf '  %s·%s %s\n' "$DIM" "$R" "$*"; }
+warn() { printf '  %s!%s %s\n' "$YLW" "$R" "$*"; }
+die()  { printf '\n%serror:%s %s\n' "$RED" "$R" "$*" >&2; exit 1; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Asking, when stdin may not be a keyboard. Under `curl … | bash` stdin is the
+# script itself, so a plain `read` would swallow the program instead of an
+# answer — the terminal has to be opened directly. With no terminal at all
+# (CI, a pipe both ways) each question falls back to its own safe answer.
+ask() {
+    local prompt="$1" reply
+    [[ "$ASSUME_YES" == 1 ]] && return 0
+    [[ -r /dev/tty ]] || return 0
+    read -r -p "  $prompt [Y/n] " reply </dev/tty || true
+    [[ -z "$reply" || "$reply" =~ ^[YyДд] ]]
+}
+
+ask_no() {
+    local prompt="$1" reply
+    [[ "$ASSUME_YES" == 1 ]] && return 1
+    [[ -r /dev/tty ]] || return 1
+    read -r -p "  $prompt [y/N] " reply </dev/tty || true
+    [[ "$reply" =~ ^[YyДд] ]]
+}
+
+# ── what the shell needs ─────────────────────────────────────────────────
+#
+# Every optional entry names the one feature that disappears without it. The
+# shell probes at runtime and hides tiles it cannot drive, so a missing
+# package costs exactly that feature and nothing else — which is why this
+# list is a menu rather than a wall.
+#
+#   command | arch package | repo|aur | why
+REQUIRED=(
+    "quickshell|quickshell|aur|the runtime that draws the shell"
+    "hyprctl|hyprland|repo|the compositor the shell talks to"
+    "git|git|repo|installing and updating this"
+)
+
+OPTIONAL=(
+    "hyprsunset|hyprsunset|repo|Night Light"
+    "dunstctl|dunst|repo|notifications and Do-Not-Disturb"
+    "nmcli|networkmanager|repo|the Network tile"
+    "wal|python-pywal|repo|recolouring the shell from the wallpaper"
+    "kitty|kitty|repo|terminal apps launched from the launcher"
+)
+
+field() { printf '%s' "$1" | cut -d'|' -f"$2"; }
+
+# Note the shape: `fc-list | grep -q` looks right and is wrong — grep quits at
+# the first match, fc-list dies of SIGPIPE, and `set -o pipefail` reports the
+# whole check as a failure. Take the output, then test it.
+have_font() {
+    have fc-list || return 1
+    [[ -n "$(fc-list 2>/dev/null | grep -i "nerd font" | head -1)" ]]
+}
+
+have_wallpaper_daemon() {
+    have awww || have swww
+}
+
+# ── package manager ──────────────────────────────────────────────────────
+pacman_helper() {
+    for h in yay paru pikaur; do
+        have "$h" && { printf '%s' "$h"; return; }
+    done
+    printf ''
+}
+
+pkg_install() {
+    # $1 = repo|aur, rest = package names
+    local kind="$1"; shift
+    [[ $# -eq 0 ]] && return 0
+
+    if ! have pacman; then
+        warn "not an Arch-based system — install these yourself: $*"
+        return 0
+    fi
+
+    if [[ "$kind" == "aur" ]]; then
+        local helper; helper="$(pacman_helper)"
+        if [[ -z "$helper" ]]; then
+            warn "these live in the AUR and no AUR helper (yay/paru) is installed: $*"
+            warn "install one, then run: notchshell doctor"
+            return 0
+        fi
+        say "  ${DIM}$helper -S --needed $*${R}"
+        "$helper" -S --needed "$@"
+    else
+        say "  ${DIM}sudo pacman -S --needed $*${R}"
+        sudo pacman -S --needed "$@"
+    fi
+}
+
+# ── dependency report ────────────────────────────────────────────────────
+# Fills MISSING_REPO / MISSING_AUR / MISSING_NOTE as a side effect.
+check_deps() {
+    MISSING_REQUIRED=()
+    MISSING_REPO=()
+    MISSING_AUR=()
+    MISSING_NOTE=()
+
+    say "  ${B}required${R}"
+    local e cmd pkg src why
+    for e in "${REQUIRED[@]}"; do
+        cmd="$(field "$e" 1)"; pkg="$(field "$e" 2)"; src="$(field "$e" 3)"; why="$(field "$e" 4)"
+        if have "$cmd"; then
+            ok "$(printf '%-12s %s' "$cmd" "${DIM}$why${R}")"
+        else
+            miss "$(printf '%-12s %s' "$cmd" "${YLW}missing${R} — $why")"
+            MISSING_REQUIRED+=("$cmd")
+            [[ "$src" == aur ]] && MISSING_AUR+=("$pkg") || MISSING_REPO+=("$pkg")
+        fi
+    done
+
+    say ""
+    say "  ${B}optional${R} ${DIM}(each one is exactly one feature)${R}"
+    for e in "${OPTIONAL[@]}"; do
+        cmd="$(field "$e" 1)"; pkg="$(field "$e" 2)"; src="$(field "$e" 3)"; why="$(field "$e" 4)"
+        if have "$cmd"; then
+            ok "$(printf '%-12s %s' "$cmd" "${DIM}$why${R}")"
+        else
+            miss "$(printf '%-12s %s' "$cmd" "${DIM}$why — the tile hides itself${R}")"
+            [[ "$src" == aur ]] && MISSING_AUR+=("$pkg") || MISSING_REPO+=("$pkg")
+        fi
+    done
+
+    # Three things that are not a plain "is this command installed".
+    if have_font; then
+        ok "$(printf '%-12s %s' "nerd font" "${DIM}every icon in the shell is a glyph${R}")"
+    else
+        miss "$(printf '%-12s %s' "nerd font" "${YLW}missing${R} — icons will be blank boxes")"
+        MISSING_REPO+=("ttf-jetbrains-mono-nerd")
+    fi
+
+    if have_wallpaper_daemon; then
+        ok "$(printf '%-12s %s' "$(have awww && echo awww || echo swww)" "${DIM}setting wallpapers${R}")"
+    else
+        miss "$(printf '%-12s %s' "swww" "${DIM}the wallpaper picker — swww or awww${R}")"
+        MISSING_NOTE+=("swww: a wallpaper daemon, from the AUR (or use awww and set system.wallpaper_command)")
+    fi
+
+    if have schemer2; then
+        ok "$(printf '%-12s %s' "schemer2" "${DIM}the pywal backend the default config asks for${R}")"
+    elif have wal; then
+        miss "$(printf '%-12s %s' "schemer2" "${DIM}pywal works without it, palettes are just less pretty${R}")"
+        MISSING_NOTE+=("schemer2: go install github.com/thefryscorer/schemer2@latest")
+    fi
+}
+
+# ── install ──────────────────────────────────────────────────────────────
+cmd_install() {
+    say ""
+    say "${B}NotchShell${R} — a Dynamic-Island shell for Hyprland"
+    say "${DIM}installs to $SHELL_DIR${R}"
+
+    step "Checking what you have"
+    check_deps
+
+    if [[ "$SKIP_DEPS" == 1 ]]; then
+        say ""
+        say "  ${DIM}--no-deps: nothing will be installed${R}"
+    elif [[ ${#MISSING_REPO[@]} -gt 0 || ${#MISSING_AUR[@]} -gt 0 ]]; then
+        say ""
+        if ask "Install the missing packages?"; then
+            [[ ${#MISSING_REPO[@]} -gt 0 ]] && pkg_install repo "${MISSING_REPO[@]}"
+            [[ ${#MISSING_AUR[@]} -gt 0 ]] && pkg_install aur "${MISSING_AUR[@]}"
+        else
+            say "  ${DIM}skipped — the shell will run with those features hidden${R}"
+        fi
+    fi
+
+    for note in "${MISSING_NOTE[@]:-}"; do
+        [[ -n "$note" ]] && warn "$note"
+    done
+
+    have quickshell || die "quickshell is required and is still not installed"
+    have git || die "git is required to install and update"
+
+    step "Fetching the shell"
+    if [[ -d "$SHELL_DIR/.git" ]]; then
+        ok "already a checkout — updating instead"
+        cmd_update
+        return
+    fi
+
+    if [[ -d "$SHELL_DIR" ]] && [[ -n "$(ls -A "$SHELL_DIR" 2>/dev/null)" ]]; then
+        local backup="$SHELL_DIR.backup-$(date +%Y%m%d-%H%M%S)"
+        warn "$SHELL_DIR exists and is not a NotchShell checkout"
+        ask "Move it aside to $(basename "$backup")?" || die "nothing installed"
+        mv "$SHELL_DIR" "$backup"
+        ok "moved to $backup"
+    fi
+
+    git clone --branch "$BRANCH" "$REPO_URL" "$SHELL_DIR"
+    ok "cloned $(git -C "$SHELL_DIR" describe --tags --always 2>/dev/null || echo "$BRANCH")"
+
+    seed_config
+    link_cli
+
+    step "Hyprland"
+    print_hypr_snippet
+
+    step "Done"
+    say "  ${B}notchshell status${R}   what is installed and what is missing"
+    say "  ${B}notchshell config${R}   edit your settings"
+    say "  ${B}notchshell update${R}   pull a new version, keeping your settings"
+    say ""
+    if ! pgrep -x quickshell >/dev/null 2>&1; then
+        ask "Start the shell now?" && start_shell
+    fi
+}
+
+seed_config() {
+    step "Your settings"
+    if [[ -f "$CONFIG" ]]; then
+        ok "$CONFIG already exists — left exactly as it is"
+        return
+    fi
+    if [[ -f "$EXAMPLE" ]]; then
+        cp "$EXAMPLE" "$CONFIG"
+        ok "created $CONFIG from the template"
+    else
+        warn "no template in the checkout; the shell will run on its defaults"
+    fi
+    say "  ${DIM}this file is in .gitignore — updates cannot touch it${R}"
+}
+
+link_cli() {
+    step "The notchshell command"
+    mkdir -p "$BIN_DIR"
+    ln -sf "$SHELL_DIR/tools/notchshell" "$BIN_DIR/notchshell"
+    ok "linked $BIN_DIR/notchshell → the checkout, so it updates with the shell"
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) ;;
+        *) warn "$BIN_DIR is not in your PATH — add it to use \`notchshell\` by name" ;;
+    esac
+}
+
+print_hypr_snippet() {
+    local lua="$HOME/.config/hypr/hyprland.lua"
+    say "  ${DIM}nothing below is written for you — your compositor config is yours.${R}"
+    say ""
+    if [[ -f "$lua" || -d "$HOME/.config/hypr/modules" ]]; then
+        say "  autostart:"
+        say "    ${B}hl.exec_cmd(\"quickshell\")${R}"
+        say "    ${B}hl.exec_cmd(\"swww-daemon\")${R}   ${DIM}# or awww-daemon${R}"
+        say ""
+        say "  keybinds:"
+        say "    ${B}hl.bind(mainMod .. \" + Space\", hl.dsp.exec_cmd(\"qs ipc call notch toggle\"))${R}"
+        say "    ${B}hl.bind(mainMod .. \" + R\",     hl.dsp.exec_cmd(\"qs ipc call launcher apps\"))${R}"
+        say "    ${B}hl.bind(mainMod .. \" + T\",     hl.dsp.exec_cmd(\"qs ipc call launcher walls\"))${R}"
+    else
+        say "  add to ~/.config/hypr/hyprland.conf:"
+        say "    ${B}exec-once = quickshell${R}"
+        say "    ${B}exec-once = swww-daemon${R}"
+        say "    ${B}bind = SUPER, Space, exec, qs ipc call notch toggle${R}"
+        say "    ${B}bind = SUPER, R,     exec, qs ipc call launcher apps${R}"
+        say "    ${B}bind = SUPER, T,     exec, qs ipc call launcher walls${R}"
+    fi
+}
+
+# Is this checkout the one `quickshell` actually loads? Installing a second
+# copy somewhere else (a fork, a test) must not kill the shell you are using.
+is_live_dir() {
+    [[ "$(readlink -f "$SHELL_DIR")" == "$(readlink -f "$HOME/.config/quickshell")" ]]
+}
+
+start_shell() {
+    if ! is_live_dir; then
+        say "  ${DIM}$SHELL_DIR is not the directory quickshell loads — start it yourself with:${R}"
+        say "    qs -p $SHELL_DIR/shell.qml"
+        return
+    fi
+    setsid nohup quickshell >/dev/null 2>&1 &
+    sleep 1
+    pgrep -x quickshell >/dev/null && ok "running" || warn "it did not come up — try \`quickshell\` in a terminal to see why"
+}
+
+# ── update ───────────────────────────────────────────────────────────────
+cmd_update() {
+    [[ -d "$SHELL_DIR/.git" ]] || die "no checkout at $SHELL_DIR — run \`notchshell install\` first"
+    have git || die "git is not installed"
+
+    step "Looking for a new version"
+    git -C "$SHELL_DIR" fetch --quiet --tags origin "$BRANCH" || die "could not reach the repository"
+
+    local head remote behind
+    head="$(git -C "$SHELL_DIR" rev-parse HEAD)"
+    remote="$(git -C "$SHELL_DIR" rev-parse "origin/$BRANCH")"
+
+    behind="$(git -C "$SHELL_DIR" rev-list --count HEAD.."origin/$BRANCH")"
+    if [[ "$head" == "$remote" || "$behind" == 0 ]]; then
+        ok "already on the newest version ($(version_string))"
+        [[ "$head" != "$remote" ]] && say "  ${DIM}(and $(git -C "$SHELL_DIR" rev-list --count "origin/$BRANCH"..HEAD) commits of your own on top)${R}"
+        report_new_options
+        return
+    fi
+
+    say "  $(version_string) → $(git -C "$SHELL_DIR" describe --tags --always "origin/$BRANCH" 2>/dev/null || echo "${remote:0:7}")  ${DIM}($behind commit$([[ "$behind" == 1 ]] || printf s))${R}"
+    say ""
+    git -C "$SHELL_DIR" log --no-merges --pretty="  • %s" HEAD.."origin/$BRANCH" | head -20 || true
+    say ""
+
+    # Local edits to PROGRAM files. shell.conf is not one of them — git does
+    # not track it, so it is not in this picture at all and cannot be lost.
+    if ! git -C "$SHELL_DIR" diff --quiet || ! git -C "$SHELL_DIR" diff --cached --quiet; then
+        warn "you have local changes to the program itself:"
+        git -C "$SHELL_DIR" --no-pager diff --stat | sed 's/^/    /'
+        say ""
+        say "  ${DIM}(your shell.conf is not in this list and is never at risk)${R}"
+        if ask_no "Stash them and update?"; then
+            git -C "$SHELL_DIR" stash push -m "notchshell update $(date -Iseconds)" >/dev/null
+            ok "stashed — restore with: git -C $SHELL_DIR stash pop"
+        else
+            die "update stopped, nothing changed"
+        fi
+    fi
+
+    ask "Update?" || { say "  ${DIM}nothing changed${R}"; return; }
+
+    step "Updating"
+    git -C "$SHELL_DIR" merge --ff-only "origin/$BRANCH" >/dev/null \
+        || die "cannot fast-forward — your checkout has diverged. Inspect it with: git -C $SHELL_DIR status"
+    ok "now on $(version_string)"
+
+    seed_config_if_missing
+    report_new_options
+
+    step "Restarting the shell"
+    cmd_restart
+}
+
+seed_config_if_missing() {
+    [[ -f "$CONFIG" ]] && return
+    [[ -f "$EXAMPLE" ]] || return
+    cp "$EXAMPLE" "$CONFIG"
+    ok "no shell.conf found — created one from the new template"
+}
+
+# Options the new version knows about and your config does not mention. It
+# never edits the file: every option has a working default, so this is news,
+# not a chore.
+config_keys() {
+    [[ -f "$1" ]] || return 0
+    awk '
+        /^[[:space:]]*#/ { next }
+        /\{[[:space:]]*$/ { section = $1; next }
+        /^[[:space:]]*}/  { section = ""; next }
+        /=/ {
+            split($0, kv, "=");
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", kv[1]);
+            if (kv[1] != "") print section "." kv[1];
+        }
+    ' "$1" | sort -u
+}
+
+report_new_options() {
+    [[ -f "$CONFIG" && -f "$EXAMPLE" ]] || return 0
+    local new
+    new="$(comm -23 <(config_keys "$EXAMPLE") <(config_keys "$CONFIG") || true)"
+    [[ -z "$new" ]] && return 0
+    say ""
+    warn "new settings in this version (your config keeps working without them):"
+    printf '    %s\n' $new
+    say "    ${DIM}see $EXAMPLE, copy across what you want${R}"
+}
+
+version_string() {
+    git -C "$SHELL_DIR" describe --tags --always 2>/dev/null || echo "unknown"
+}
+
+# ── status / doctor ──────────────────────────────────────────────────────
+cmd_status() {
+    step "NotchShell"
+    if [[ -d "$SHELL_DIR/.git" ]]; then
+        ok "installed at $SHELL_DIR ($(version_string))"
+        local head remote
+        head="$(git -C "$SHELL_DIR" rev-parse HEAD 2>/dev/null || true)"
+        remote="$(git -C "$SHELL_DIR" rev-parse "origin/$BRANCH" 2>/dev/null || true)"
+        if [[ -n "$remote" && "$head" != "$remote" ]]; then
+            warn "$(git -C "$SHELL_DIR" rev-list --count HEAD.."origin/$BRANCH") commits behind — run \`notchshell update\`"
+            say "    ${DIM}(last checked when you last ran update; fetch happens there)${R}"
+        fi
+        git -C "$SHELL_DIR" diff --quiet || warn "the program has local edits"
+    else
+        miss "not installed at $SHELL_DIR"
+    fi
+
+    pgrep -x quickshell >/dev/null && ok "the shell is running" || miss "the shell is not running"
+
+    step "Your settings"
+    if [[ -f "$CONFIG" ]]; then
+        ok "$CONFIG"
+        grep -vE '^[[:space:]]*(#|$)' "$CONFIG" | sed 's/^/    /' || true
+    else
+        miss "no shell.conf — the shell is running on its built-in defaults"
+    fi
+
+    step "Features"
+    check_deps
+}
+
+cmd_doctor() {
+    step "Dependencies"
+    check_deps
+
+    step "Environment"
+    pgrep -x Hyprland >/dev/null && ok "Hyprland is running" || warn "Hyprland does not seem to be running"
+
+    local walls
+    walls="$HOME/$(read_setting system.wallpapers "Pictures/Wallpapers")"
+    [[ -d "$walls" ]] && ok "wallpaper directory: $walls" \
+                      || warn "wallpaper directory not found: $walls  ${DIM}(system.wallpapers)${R}"
+
+    [[ -f "$HOME/.cache/wal/colors.json" ]] && ok "pywal palette present" \
+        || warn "no ~/.cache/wal/colors.json yet — the shell uses its fallback palette until you set a wallpaper"
+
+    if [[ -L "$BIN_DIR/notchshell" ]]; then
+        ok "notchshell command: $BIN_DIR/notchshell"
+    else
+        warn "the notchshell command is not linked — run \`notchshell install\`"
+    fi
+
+    step "Config"
+    if [[ -f "$CONFIG" ]]; then
+        ok "$CONFIG"
+        report_new_options
+    else
+        miss "no shell.conf (defaults apply)"
+    fi
+}
+
+# One value out of the user's config, for the checks above.
+read_setting() {
+    local key="$1" fallback="$2" section field
+    section="${key%%.*}"; field="${key##*.}"
+    [[ -f "$CONFIG" ]] || { printf '%s' "$fallback"; return; }
+    awk -v s="$section" -v f="$field" '
+        /^[[:space:]]*#/ { next }
+        $0 ~ "^[[:space:]]*" s "[[:space:]]*\\{" { inside = 1; next }
+        inside && /^[[:space:]]*}/ { inside = 0 }
+        inside && $0 ~ "^[[:space:]]*" f "[[:space:]]*=" {
+            sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+#.*$/, "");
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "");
+            print; exit
+        }
+    ' "$CONFIG" | grep . || printf '%s' "$fallback"
+}
+
+# ── config / restart / uninstall ─────────────────────────────────────────
+cmd_config() {
+    case "${1:-edit}" in
+        edit)
+            [[ -f "$CONFIG" ]] || seed_config
+            "${EDITOR:-nano}" "$CONFIG"
+            ;;
+        --diff|diff)
+            report_new_options || true
+            [[ -f "$CONFIG" ]] && diff -u "$EXAMPLE" "$CONFIG" || true
+            ;;
+        --path|path) printf '%s\n' "$CONFIG" ;;
+        --reset|reset)
+            [[ -f "$EXAMPLE" ]] || die "no template to reset from"
+            if [[ -f "$CONFIG" ]]; then
+                local backup="$CONFIG.backup-$(date +%Y%m%d-%H%M%S)"
+                ask_no "Replace your config with the template? (a backup is kept)" || die "nothing changed"
+                cp "$CONFIG" "$backup"
+                ok "backed up to $backup"
+            fi
+            cp "$EXAMPLE" "$CONFIG"
+            ok "reset to the template"
+            ;;
+        *) die "unknown: notchshell config $1" ;;
+    esac
+}
+
+cmd_restart() {
+    if ! is_live_dir; then
+        say "  ${DIM}not the live checkout — nothing to restart${R}"
+        return
+    fi
+    if pgrep -x quickshell >/dev/null; then
+        pkill -x quickshell || true
+        sleep 1
+    fi
+    start_shell
+}
+
+cmd_uninstall() {
+    step "Uninstalling"
+    [[ -L "$BIN_DIR/notchshell" ]] && { rm -f "$BIN_DIR/notchshell"; ok "removed $BIN_DIR/notchshell"; }
+    pgrep -x quickshell >/dev/null && { pkill -x quickshell || true; ok "stopped the shell"; }
+
+    if ask_no "Remove the program directory $SHELL_DIR?"; then
+        if [[ -f "$CONFIG" ]] && ask "Keep your shell.conf? (copied to ~/notchshell-shell.conf)"; then
+            cp "$CONFIG" "$HOME/notchshell-shell.conf"
+            ok "your settings are at ~/notchshell-shell.conf"
+        fi
+        rm -rf "$SHELL_DIR"
+        ok "removed $SHELL_DIR"
+    else
+        say "  ${DIM}left in place — nothing was deleted${R}"
+    fi
+
+    step "One thing left for you"
+    say "  Remove the NotchShell lines from your Hyprland config"
+    say "  ${DIM}(the autostart and the keybinds — this script never wrote them)${R}"
+}
+
+# ── entry point ──────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+
+${B}notchshell${R} — install, update and check NotchShell
+
+  ${B}install${R}     install the shell, its dependencies and this command
+  ${B}update${R}      pull the newest version. Your shell.conf is never touched
+  ${B}status${R}      version, what is running, your settings, what is missing
+  ${B}doctor${R}      the same checks, plus the environment around the shell
+  ${B}config${R}      edit your settings   (also: config diff | path | reset)
+  ${B}restart${R}     restart the running shell
+  ${B}uninstall${R}   remove the program (asks before touching your settings)
+
+  --yes       answer every prompt with yes
+  --no-deps   never install packages, only report what is missing
+
+${DIM}program: $SHELL_DIR
+settings: $CONFIG  (git-ignored, so updates cannot overwrite it)${R}
+
+EOF
+}
+
+main() {
+    [[ "${BASH_VERSINFO[0]}" -ge "$NOTCHSHELL_VERSION_MIN_BASH" ]] || die "bash ${NOTCHSHELL_VERSION_MIN_BASH}+ required"
+
+    local args=()
+    for a in "$@"; do
+        case "$a" in
+            --yes|-y) ASSUME_YES=1 ;;
+            --no-deps) SKIP_DEPS=1 ;;
+            *) args+=("$a") ;;
+        esac
+    done
+    set -- ${args[@]+"${args[@]}"}
+
+    case "${1:-help}" in
+        install)   cmd_install ;;
+        update|upgrade)
+            # This script lives in the checkout it is about to replace, and
+            # bash reads a script as it runs it. Run the update from a copy so
+            # the file changing underneath cannot corrupt the run.
+            if [[ -z "${NOTCHSHELL_REEXEC:-}" && -f "$SHELL_DIR/tools/notchshell" ]]; then
+                local tmp; tmp="$(mktemp)"
+                cp "$SHELL_DIR/tools/notchshell" "$tmp"
+                NOTCHSHELL_REEXEC=1 NOTCHSHELL_YES="$ASSUME_YES" bash "$tmp" update
+                rm -f "$tmp"
+            else
+                cmd_update
+            fi
+            ;;
+        status)    cmd_status ;;
+        doctor)    cmd_doctor ;;
+        config)    shift || true; cmd_config "${1:-edit}" ;;
+        restart)   cmd_restart ;;
+        uninstall) cmd_uninstall ;;
+        help|--help|-h) usage ;;
+        *) die "unknown command: $1  (try: notchshell help)" ;;
+    esac
+}
+
+main "$@"

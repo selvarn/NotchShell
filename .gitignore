@@ -1,0 +1,7 @@
+# Yours, not the program's. Updates fast-forward everything git tracks, so
+# anything a person edits by hand has to be outside that set — this file is
+# the mechanism, not a promise: git cannot overwrite what it cannot see.
+shell.conf
+
+# Backups the tools make before touching anything.
+*.backup-*
